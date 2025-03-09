@@ -14,10 +14,20 @@ import {
   Radio,
   RadioGroup,
   Alert,
+  Snackbar,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
 } from '@mui/material';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AddPhotoAlternateIcon from '@mui/icons-material/AddPhotoAlternate';
-import { getPost, updatePost } from '../utils/storage';
+import SaveIcon from '@mui/icons-material/Save';
+import { getPost, updatePost, saveDraftWithId, getDrafts, getDraftById, deleteDraft } from '../utils/storage';
 
 export default function BlogEdit() {
   const [formData, setFormData] = useState({
@@ -26,7 +36,11 @@ export default function BlogEdit() {
     thumbnailImage: '',
     images: [],
   });
+  const [originalPost, setOriginalPost] = useState(null);
   const [error, setError] = useState('');
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
+  const [openDraftsDialog, setOpenDraftsDialog] = useState(false);
+  const [drafts, setDrafts] = useState([]);
   const { id } = useParams();
   const navigate = useNavigate();
 
@@ -39,10 +53,37 @@ export default function BlogEdit() {
         thumbnailImage: post.thumbnailImage || '',
         images: post.images || [],
       });
+      setOriginalPost(post);
+      
+      // 해당 게시글의 임시저장 확인
+      const draft = getDraftById(id);
+      if (draft) {
+        setSnackbar({
+          open: true,
+          message: '이 글의 임시저장본이 있습니다. 임시저장 목록에서 확인하세요.',
+          severity: 'info'
+        });
+      }
     } else {
       setError('게시글을 찾을 수 없습니다.');
     }
+    
+    // 임시저장 목록 불러오기
+    setDrafts(getDrafts().filter(draft => draft.originalPostId === id));
   }, [id]);
+
+  // 자동 저장 (30초마다)
+  useEffect(() => {
+    if (!originalPost) return;
+    
+    const autoSaveInterval = setInterval(() => {
+      if (formData.title.trim() || formData.content.trim()) {
+        handleAutoSave();
+      }
+    }, 30000);
+    
+    return () => clearInterval(autoSaveInterval);
+  }, [formData, originalPost]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -50,6 +91,39 @@ export default function BlogEdit() {
       ...prev,
       [name]: value,
     }));
+  };
+
+  const handleAutoSave = () => {
+    if (formData.title.trim() || formData.content.trim()) {
+      saveDraftWithId(`edit_${id}_${Date.now()}`, {
+        ...formData,
+        originalPostId: id
+      });
+    }
+  };
+
+  const handleManualSave = () => {
+    if (formData.title.trim() || formData.content.trim()) {
+      saveDraftWithId(`edit_${id}_${Date.now()}`, {
+        ...formData,
+        originalPostId: id
+      });
+      
+      setSnackbar({
+        open: true,
+        message: '임시저장 되었습니다.',
+        severity: 'success'
+      });
+      
+      // 임시저장 목록 업데이트
+      setDrafts(getDrafts().filter(draft => draft.originalPostId === id));
+    } else {
+      setSnackbar({
+        open: true,
+        message: '제목이나 내용을 입력해주세요.',
+        severity: 'warning'
+      });
+    }
   };
 
   const handleImageUpload = useCallback((e) => {
@@ -86,16 +160,50 @@ export default function BlogEdit() {
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!formData.title.trim() || !formData.content.trim()) {
-      setError('제목과 내용을 모두 입력해주세요.');
+      setSnackbar({
+        open: true,
+        message: '제목과 내용을 모두 입력해주세요.',
+        severity: 'error'
+      });
       return;
     }
 
     const updated = updatePost(id, formData);
     if (updated) {
+      // 해당 게시글의 모든 임시저장 삭제
+      const relatedDrafts = getDrafts().filter(draft => draft.originalPostId === id);
+      relatedDrafts.forEach(draft => deleteDraft(draft.id));
+      
       navigate('/');
     } else {
       setError('수정 중 오류가 발생했습니다.');
     }
+  };
+
+  const handleLoadDraft = (draft) => {
+    setFormData(draft);
+    setOpenDraftsDialog(false);
+    setSnackbar({
+      open: true,
+      message: '임시저장된 글을 불러왔습니다.',
+      severity: 'success'
+    });
+  };
+
+  const handleDeleteDraft = (id, event) => {
+    event.stopPropagation();
+    deleteDraft(id);
+    setDrafts(getDrafts().filter(draft => draft.originalPostId === originalPost.id));
+    setSnackbar({
+      open: true,
+      message: '임시저장된 글이 삭제되었습니다.',
+      severity: 'success'
+    });
+  };
+
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return `${date.getFullYear()}. ${date.getMonth() + 1}. ${date.getDate()} ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
   };
 
   if (error) {
@@ -116,9 +224,29 @@ export default function BlogEdit() {
   return (
     <Container maxWidth="lg">
       <Box sx={{ py: 0, mt: '32px', px: { xs: '16px', md: 0 } }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          글 수정하기
-        </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+          <Typography variant="h4" component="h1">
+            글 수정하기
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 2 }}>
+            <Button 
+              variant="outlined" 
+              color="primary" 
+              startIcon={<SaveIcon />}
+              onClick={handleManualSave}
+            >
+              임시저장
+            </Button>
+            <Button 
+              variant="outlined" 
+              color="secondary"
+              onClick={() => setOpenDraftsDialog(true)}
+              disabled={drafts.length === 0}
+            >
+              임시저장 목록 ({drafts.length})
+            </Button>
+          </Box>
+        </Box>
         <Paper sx={{ p: 3 }} elevation={0}>
           <Box component="form" onSubmit={handleSubmit}>
             <TextField
@@ -234,6 +362,71 @@ export default function BlogEdit() {
           </Box>
         </Paper>
       </Box>
+
+      {/* 임시저장 목록 다이얼로그 */}
+      <Dialog
+        open={openDraftsDialog}
+        onClose={() => setOpenDraftsDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>임시저장 목록</DialogTitle>
+        <DialogContent dividers>
+          {drafts.length > 0 ? (
+            <List>
+              {drafts.map((draft) => (
+                <ListItem 
+                  key={draft.id} 
+                  button 
+                  onClick={() => handleLoadDraft(draft)}
+                  sx={{ 
+                    border: '1px solid #eee', 
+                    borderRadius: 1, 
+                    mb: 1,
+                    '&:hover': { bgcolor: '#f5f5f5' } 
+                  }}
+                >
+                  <ListItemText
+                    primary={draft.title || '(제목 없음)'}
+                    secondary={`마지막 저장: ${formatDate(draft.lastSaved)}`}
+                  />
+                  <ListItemSecondaryAction>
+                    <IconButton 
+                      edge="end" 
+                      aria-label="delete"
+                      onClick={(e) => handleDeleteDraft(draft.id, e)}
+                    >
+                      <DeleteIcon />
+                    </IconButton>
+                  </ListItemSecondaryAction>
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Typography align="center" sx={{ py: 3 }}>
+              임시저장된 글이 없습니다.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenDraftsDialog(false)}>닫기</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 알림 스낵바 */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+      >
+        <Alert 
+          onClose={() => setSnackbar({ ...snackbar, open: false })} 
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Container>
   );
 } 

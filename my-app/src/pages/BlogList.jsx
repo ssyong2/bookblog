@@ -11,21 +11,40 @@ import {
   Box,
   useTheme,
   useMediaQuery,
+  Badge,
+  Tooltip,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemSecondaryAction,
+  IconButton,
+  Snackbar,
+  Alert,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
-import { getPosts, deletePost } from '../utils/storage';
+import DeleteIcon from '@mui/icons-material/Delete';
+import SaveIcon from '@mui/icons-material/Save';
+import { getPosts, deletePost, getDrafts, deleteDraft } from '../utils/storage';
 import BlogPost from './BlogPost';
 
 export default function BlogList() {
   const [posts, setPosts] = useState([]);
   const [selectedPost, setSelectedPost] = useState(null);
   const [openModal, setOpenModal] = useState(false);
+  const [drafts, setDrafts] = useState([]);
+  const [openDraftsDialog, setOpenDraftsDialog] = useState(false);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const navigate = useNavigate();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   useEffect(() => {
     setPosts(getPosts());
+    setDrafts(getDrafts());
   }, []);
 
   const handleDelete = (id) => {
@@ -55,6 +74,32 @@ export default function BlogList() {
     return null;
   };
 
+  const handleDeleteDraft = (id, event) => {
+    event.stopPropagation();
+    deleteDraft(id);
+    setDrafts(getDrafts());
+    setSnackbar({
+      open: true,
+      message: '임시저장된 글이 삭제되었습니다.',
+      severity: 'success'
+    });
+  };
+
+  const handleContinueWriting = (draft) => {
+    if (draft.originalPostId) {
+      // 수정 중이던 글
+      navigate(`/edit/${draft.originalPostId}`);
+    } else {
+      // 새로 작성 중이던 글
+      navigate('/write');
+    }
+  };
+
+  const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    return `${date.getFullYear()}. ${date.getMonth() + 1}. ${date.getDate()} ${date.getHours()}:${date.getMinutes().toString().padStart(2, '0')}`;
+  };
+
   return (
     <Box sx={{ width: '100%', p: 0 }}>
       <Box sx={{ 
@@ -70,14 +115,30 @@ export default function BlogList() {
         <Typography variant="h4" component="h1" gutterBottom={isMobile}>
           나의 독서 블로그
         </Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => navigate('/write')}
-          fullWidth={isMobile}
-        >
-          새 글 작성
-        </Button>
+        <Box sx={{ display: 'flex', gap: 2 }}>
+          {drafts.length > 0 && (
+            <Tooltip title="임시저장된 글이 있습니다">
+              <Button
+                variant="outlined"
+                color="secondary"
+                startIcon={<SaveIcon />}
+                onClick={() => setOpenDraftsDialog(true)}
+              >
+                <Badge badgeContent={drafts.length} color="error">
+                  임시저장 목록
+                </Badge>
+              </Button>
+            </Tooltip>
+          )}
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => navigate('/write')}
+            fullWidth={isMobile}
+          >
+            새 글 작성
+          </Button>
+        </Box>
       </Box>
 
       <Box sx={{ 
@@ -186,6 +247,71 @@ export default function BlogList() {
         onClose={handleCloseModal}
         onDelete={() => setPosts(getPosts())}
       />
+
+      {/* 임시저장 목록 다이얼로그 */}
+      <Dialog
+        open={openDraftsDialog}
+        onClose={() => setOpenDraftsDialog(false)}
+        maxWidth="md"
+        fullWidth
+      >
+        <DialogTitle>임시저장 목록</DialogTitle>
+        <DialogContent dividers>
+          {drafts.length > 0 ? (
+            <List>
+              {drafts.map((draft) => (
+                <ListItem 
+                  key={draft.id} 
+                  button 
+                  onClick={() => handleContinueWriting(draft)}
+                  sx={{ 
+                    border: '1px solid #eee', 
+                    borderRadius: 1, 
+                    mb: 1,
+                    '&:hover': { bgcolor: '#f5f5f5' } 
+                  }}
+                >
+                  <ListItemText
+                    primary={draft.title || '(제목 없음)'}
+                    secondary={`마지막 저장: ${formatDate(draft.lastSaved)} ${draft.originalPostId ? '(수정 중)' : '(새 글)'}`}
+                  />
+                  <ListItemSecondaryAction>
+                    <IconButton 
+                      edge="end" 
+                      aria-label="delete"
+                      onClick={(e) => handleDeleteDraft(draft.id, e)}
+                    >
+                      <DeleteIcon />
+                    </IconButton>
+                  </ListItemSecondaryAction>
+                </ListItem>
+              ))}
+            </List>
+          ) : (
+            <Typography align="center" sx={{ py: 3 }}>
+              임시저장된 글이 없습니다.
+            </Typography>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenDraftsDialog(false)}>닫기</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* 알림 스낵바 */}
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={3000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+      >
+        <Alert 
+          onClose={() => setSnackbar({ ...snackbar, open: false })} 
+          severity={snackbar.severity}
+          sx={{ width: '100%' }}
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 } 
